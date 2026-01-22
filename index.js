@@ -1,16 +1,15 @@
 import express from "express";
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 // ================= CONFIG =================
+const PORT = process.env.PORT || 8080;
 const SECRET_KEY = "DQOWHDIUQWHIQUWHDWQIUDHQWIUDHQWHDQWIUFHQIFQ";
 
 // ================= KEYS =================
-// Each key can have its own expiration; hwid null = first use
 const keys = {
   "1f5531ecdc71b76979960fb624e81154": { hwid: null, expires: new Date("2026-02-25T00:00:00Z") },
   "TESTKEY-2025": { hwid: null, expires: new Date("2025-01-01T00:00:00Z") },
-  "LIFETIME-KEY-001": { hwid: null, expires: null } // null = no expiry
+  "LIFETIME-KEY-001": { hwid: null, expires: null }
 };
 
 // ================= HELPERS =================
@@ -33,10 +32,8 @@ app.get("/v9/auth", (req, res) => {
 
   const keyData = keys[k];
 
-  // ================= EXPIRATION CHECK =================
   if (keyData.expires && new Date() > keyData.expires) return unauthorized(res, "Key expired");
 
-  // ================= HWID LOCK =================
   if (!keyData.hwid) {
     keyData.hwid = hwid;
     console.log(`HWID locked for key ${k}: ${hwid}`);
@@ -44,12 +41,11 @@ app.get("/v9/auth", (req, res) => {
     return unauthorized(res, `HWID mismatch. Expected ${keyData.hwid}, got ${hwid}`);
   }
 
-  // ================= SUCCESS =================
   console.log(`AUTH SUCCESS: key ${k} for HWID ${hwid}`);
   return res.status(200).send(""); // empty string = success
 });
 
-// ================= HWID RESET (for testing) =================
+// ================= HWID RESET =================
 app.get("/reset-hwid", (req, res) => {
   const { k, secret } = req.query;
   if (secret !== SECRET_KEY) return res.status(403).send("Forbidden");
