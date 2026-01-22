@@ -3,24 +3,31 @@ import express from "express";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// === CONFIG ===
+// ================= CONFIG =================
 const SECRET_KEY = "DQOWHDIUQWHIQUWHDWQIUDHQWIUDHQWHDQWIUFHQIFQ";
-const VALID_SCRIPT_KEYS = new Set([
-  "1f5531ecdc71b76979960fb624e81154"
-]);
+const EXPIRATION_DATE = new Date("2026-02-25T00:00:00Z");
+
+// Key database (use real DB later)
+const keys = {
+  "1f5531ecdc71b76979960fb624e81154": {
+    hwid: null,
+    expires: EXPIRATION_DATE
+  }
+};
 
 const blacklisted = new Set();
 
-// === HELPERS ===
+// ================= HELPERS =================
 function unauthorized(res) {
-  res.status(200).send("Unauthorized!");
+  return res.status(200).send("Unauthorized!");
 }
 
-// === AUTH ENDPOINT ===
+// ================= AUTH =================
 app.get("/v9/auth", (req, res) => {
   const {
     SECRET_KEY: secret,
     k,
+    hwid,
     experienceId,
     t,
     t2,
@@ -28,17 +35,31 @@ app.get("/v9/auth", (req, res) => {
     t4
   } = req.query;
 
-  // Basic validation
+  // Basic checks
   if (secret !== SECRET_KEY) return unauthorized(res);
-  if (!VALID_SCRIPT_KEYS.has(k)) return unauthorized(res);
+  if (!keys[k]) return unauthorized(res);
+  if (!hwid) return unauthorized(res);
   if (!experienceId || !t || !t2 || !t3 || !t4) return unauthorized(res);
-  if (blacklisted.has(k)) return unauthorized(res);
 
-  // SUCCESS → return empty body
+  const keyData = keys[k];
+
+  // Expiration check
+  if (new Date() > keyData.expires) {
+    return unauthorized(res);
+  }
+
+  // HWID lock
+  if (!keyData.hwid) {
+    keyData.hwid = hwid;
+    console.log(`HWID locked for key ${k}: ${hwid}`);
+  } else if (keyData.hwid !== hwid) {
+    return unauthorized(res);
+  }
+
   return res.status(200).send("");
 });
 
-// === BLACKLIST ENDPOINT ===
+// ================= BLACKLIST =================
 app.get("/auth/bl", (req, res) => {
   const { K, r, experienceId } = req.query;
 
@@ -54,12 +75,12 @@ app.get("/auth/bl", (req, res) => {
     experienceId
   });
 
-  return res
-    .status(200)
-    .send("Key and user blacklisted successfully");
+  return res.status(200).send(
+    "Key and user blacklisted successfully"
+  );
 });
 
-// === START SERVER ===
+// ================= START =================
 app.listen(PORT, () => {
-  console.log(`Auth server running on port ${PORT}`);
+  console.log(`Auth server running on ${PORT}`);
 });
