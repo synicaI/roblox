@@ -3,97 +3,93 @@ import express from "express";
 const app = express();
 app.use(express.json());
 
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const PORT = 8080;
+const SECRET_KEY = process.env.SECRET_KEY || "CHANGE_ME";
 
-// ================= KEYS =================
-const keys = new Map();
+// =====================
+// IN-MEMORY KEY STORE
+// =====================
+// key : { hwid: string | null }
+const KEYS = {};
 
-// ================= HELPER =================
-async function logWebhook(title, fields) {
-    if (!WEBHOOK_URL) return;
-
-    await fetch(WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            embeds: [{
-                title,
-                color: 0x2b2d31,
-                fields,
-                timestamp: new Date().toISOString()
-            }]
-        })
-    });
+// =====================
+// AUTH MIDDLEWARE
+// =====================
+function auth(req, res, next) {
+  if (req.headers["x-secret"] !== SECRET_KEY) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  next();
 }
 
-// ================= ADMIN ROUTES =================
-app.post("/admin/key/add", async (req, res) => {
-    const { key, admin } = req.body;
-    if (!key) return res.status(400).send("Missing key");
+// =====================
+// DISCORD ROUTES
+// =====================
 
-    keys.set(key, { hwid: null, expires: null });
+// ADD KEY
+app.post("/key/add", auth, (req, res) => {
+  const { key } = req.body;
+  if (!key) return res.status(400).json({ error: "Missing key" });
 
-    await logWebhook("🔑 Key Added", [
-        { name: "Key", value: key, inline: true },
-        { name: "By", value: admin ?? "Unknown", inline: true }
-    ]);
+  if (!KEYS[key]) {
+    KEYS[key] = { hwid: null };
+  }
 
-    res.send("OK");
+  res.json({ success: true });
 });
 
-app.post("/admin/key/delete", async (req, res) => {
-    const { key, admin } = req.body;
-    if (!keys.has(key)) return res.status(404).send("Not found");
+// DELETE KEY
+app.post("/key/delete", auth, (req, res) => {
+  const { key } = req.body;
+  if (!key) return res.status(400).json({ error: "Missing key" });
 
-    keys.delete(key);
-
-    await logWebhook("🗑️ Key Deleted", [
-        { name: "Key", value: key, inline: true },
-        { name: "By", value: admin ?? "Unknown", inline: true }
-    ]);
-
-    res.send("OK");
+  delete KEYS[key];
+  res.json({ success: true });
 });
 
-app.get("/admin/key/list", (req, res) => {
-    res.json([...keys.entries()]);
+// RESET HWID
+app.post("/key/reset", auth, (req, res) => {
+  const { key } = req.body;
+  if (!KEYS[key]) return res.status(404).json({ error: "Key not found" });
+
+  KEYS[key].hwid = null;
+  res.json({ success: true });
 });
 
-// ================= ROBLOX AUTH =================
-app.get("/v9/auth", async (req, res) => {
-    const { k, hwid, experienceId } = req.query;
-
-    if (!k || !hwid || !experienceId) {
-        return res.status(401).send("AUTH_FAIL");
-    }
-
-    if (!keys.has(k)) {
-        return res.status(401).send("AUTH_FAIL");
-    }
-
-    const data = keys.get(k);
-
-    // HWID lock
-    if (data.hwid === null) {
-        data.hwid = hwid;
-        keys.set(k, data);
-
-        await logWebhook("🔒 HWID Locked", [
-            { name: "Key", value: k },
-            { name: "HWID", value: hwid },
-            { name: "ExperienceId", value: experienceId }
-        ]);
-    }
-
-    if (data.hwid !== hwid) {
-        return res.status(401).send("AUTH_FAIL");
-    }
-
-    return res.status(200).send("");
+// LIST KEYS
+app.get("/key/list", auth, (req, res) => {
+  res.json({
+    keys: Object.keys(KEYS).map(k => ({
+      key: k,
+      hwid: KEYS[k].hwid
+    }))
+  });
 });
 
-// ================= START =================
-const PORT = process.env.PORT || 8080;
+// =====================
+// ROBLOX VERIFY
+// =====================
+app.post("/auth/verify", (req, res) => {
+  const { key, hwid } = req.body;
+
+  if (!KEYS[key]) {
+    return res.json({ valid: false, reason: "Invalid key" });
+  }
+
+  // first execution → lock HWID
+  if (KEYS[key].hwid === null) {
+    KEYS[key].hwid = hwid;
+    return res.json({ valid: true, first: true });
+  }
+
+  // HWID mismatch
+  if (KEYS[key].hwid !== hwid) {
+    return res.json({ valid: false, reason: "HWID mismatch" });
+  }
+
+  res.json({ valid: true });
+});
+
 app.listen(PORT, () => {
-    console.log(`Auth server running on port ${PORT}`);
+  console.log("Auth server running on", PORT);
 });
